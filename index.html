@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FloraLens - Flower Identifier</title> <!-- app name (2 of 3) -->
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f3f6f1; margin: 0;
+           display: flex; justify-content: center; padding: 24px; color: #222; }
+    .card { background: #fff; border-radius: 16px; padding: 24px; max-width: 480px;
+            width: 100%; box-shadow: 0 4px 20px rgba(0,0,0,.08); }
+    h1 { font-size: 1.5rem; margin: 0 0 4px; }
+    .subtitle { color: #666; margin: 0 0 18px; font-size: .95rem; }
+    .drop { border: 2px dashed #a9b8a3; border-radius: 12px; padding: 28px;
+            text-align: center; cursor: pointer; color: #666; }
+    .drop.over { background: #e8efe4; }
+    #preview { max-width: 100%; border-radius: 12px; margin-top: 16px; display: none; }
+    #status { margin-top: 16px; color: #666; }
+    #status.error { color: #b3261e; }
+    .row { margin-top: 14px; }
+    .label { display: flex; justify-content: space-between;
+             text-transform: capitalize; font-weight: 600; }
+    .bar { height: 10px; background: #eee; border-radius: 5px; overflow: hidden; margin-top: 4px; }
+    .fill { height: 100%; background: #c2548a; width: 0; transition: width .5s; }
+    .note { margin-top: 20px; font-size: .8rem; color: #888; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>FloraLens</h1> <!-- app name (3 of 3) -->
+    <p class="subtitle">Upload a flower photo and find out the species.</p>
+
+    <div class="drop" id="drop">Click or drag a flower photo here</div>
+    <input type="file" id="file" accept="image/*" hidden>
+    <img id="preview" alt="Uploaded photo">
+    <div id="status"></div>
+    <div id="results"></div>
+
+    <p class="note">
+      The model knows 102 flower species (Oxford Flowers 102). Photos of other plants,
+      animals or objects will still get a guess, so treat low percentages with caution.
+    </p>
+  </div>
+
+  <script>
+    // Served by the server: relative address. Opened from disk: local server.
+    const API_URL = window.location.protocol === "file:"
+      ? "http://127.0.0.1:8000/predict"
+      : "/predict";
+
+    const drop = document.getElementById("drop");
+    const input = document.getElementById("file");
+    const preview = document.getElementById("preview");
+    const statusEl = document.getElementById("status");
+    const results = document.getElementById("results");
+
+    drop.addEventListener("click", () => input.click());
+    input.addEventListener("change", () => {
+      if (input.files[0]) handleFile(input.files[0]);
+    });
+
+    drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+    drop.addEventListener("drop", (e) => {
+      e.preventDefault();
+      drop.classList.remove("over");
+      if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    });
+
+    function showError(text) {
+      statusEl.textContent = text;
+      statusEl.className = "error";
+    }
+
+    function escapeHtml(s) {
+      const d = document.createElement("div");
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    async function handleFile(file) {
+      if (!file.type.startsWith("image/")) {
+        showError("Please choose an image file.");
+        return;
+      }
+      preview.src = URL.createObjectURL(file);
+      preview.style.display = "block";
+      results.innerHTML = "";
+      statusEl.className = "";
+      statusEl.textContent = "Identifying species...";
+
+      const form = new FormData();
+      form.append("file", file);
+
+      try {
+        const res = await fetch(API_URL, { method: "POST", body: form });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || "Server error.");
+        }
+        const data = await res.json();
+        render(data.predictions);
+      } catch (e) {
+        showError(e.message === "Failed to fetch"
+          ? "Cannot reach the server. Is uvicorn running?"
+          : e.message);
+      }
+    }
+
+    // Top-3 predictions with confidence bars (flower names, not numbers)
+    function render(preds) {
+      statusEl.textContent = "";
+      results.innerHTML = preds.map((p) => {
+        const pct = (p.confidence * 100).toFixed(1);
+        return `<div class="row">
+          <div class="label"><span>${escapeHtml(p.species)}</span><span>${pct}%</span></div>
+          <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
+        </div>`;
+      }).join("");
+    }
+  </script>
+</body>
+</html>
